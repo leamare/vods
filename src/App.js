@@ -41,6 +41,8 @@ const App = () => {
       setSearchInput("");
       setTagArray([]);
       setSearchKey((k) => k + 1);
+    } else {
+      window.history.replaceState(null, '', process.env.PUBLIC_URL + '/');
     }
   }, [isHomePage]);
 
