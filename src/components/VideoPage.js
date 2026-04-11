@@ -92,21 +92,18 @@ export default function VideoPage() {
       hasInitializedRef.current = false;
       lastInitializedIdRef.current = id;
     }
-    
+
+    if (hasInitializedRef.current) return;
+    hasInitializedRef.current = true;
+
     const timeParam = searchParams.get('time');
     if (timeParam) {
       const seconds = parseTimeToSeconds(timeParam);
       if (seconds !== null && seconds >= 0) {
         setInitialTime(seconds);
-        if (!hasInitializedRef.current) {
-          hasInitializedRef.current = true;
-        }
         return;
       }
     }
-    
-    if (hasInitializedRef.current) return;
-    hasInitializedRef.current = true;
     
     try {
       const saved = localStorage.getItem('videoPlaybackState');
@@ -276,7 +273,7 @@ export default function VideoPage() {
       playerRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playlist?.youtubeId, setSearchParams]);
+  }, [playlist?.youtubeId]);
 
   const updateUrlTime = useCallback((time) => {
     if (time > 0) {
