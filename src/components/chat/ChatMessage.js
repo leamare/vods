@@ -190,7 +190,7 @@ export default function ChatMessage({
     if (onSeek) onSeek(Math.floor(message.time + chatDelay) + 1);
   };
 
-  const timestampUrl = videoId ? `/vods/video/${videoId}?time=${formatTimeForUrl(message.time, chatDelay)}` : '#';
+  const timestampUrl = videoId ? `#/video/${videoId}?time=${formatTimeForUrl(message.time, chatDelay)}` : '#';
 
   const messageStyle = showBorder ? { borderBottom: '1px solid rgba(255,255,255,0.1)' } : {};
 

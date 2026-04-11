@@ -1,7 +1,7 @@
 import { createTheme, CssBaseline, ThemeProvider } from "@mui/material";
 import React from "react";
 import ReactDOM from "react-dom";
-import { BrowserRouter } from "react-router-dom";
+import { HashRouter } from "react-router-dom";
 import App from "./App";
 
 const theme = createTheme({
@@ -48,10 +48,10 @@ const theme = createTheme({
 ReactDOM.render(
   <React.StrictMode>
     <ThemeProvider theme={theme}>
-      <BrowserRouter basename={process.env.PUBLIC_URL}>
+      <HashRouter>
         <CssBaseline />
         <App />
-      </BrowserRouter>
+      </HashRouter>
     </ThemeProvider>
   </React.StrictMode>,
   document.getElementById("root")

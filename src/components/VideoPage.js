@@ -209,7 +209,7 @@ export default function VideoPage() {
             hasInitializedRef.current = false;
             setShowDescription(false);
 
-            window.history.replaceState(null, '', `/vods/video/${newVideo.youtubeId}`);
+            window.history.replaceState(null, '', `#/video/${newVideo.youtubeId}`);
           }
         }
       }
@@ -370,7 +370,7 @@ export default function VideoPage() {
       const newVideo = playlist.videos[index];
       if (newVideo) {
         isPartSwitchRef.current = true;
-        window.history.replaceState(null, '', `/vods/video/${videoId}`);
+        window.history.replaceState(null, '', `#/video/${videoId}`);
         
         setVideo(newVideo);
         setCurrentPlaylistIndex(index);
@@ -507,7 +507,7 @@ export default function VideoPage() {
     .replace(/\b(\d{1,2}:)?(\d{1,2}):(\d{2})\b/g, (match) => {
       const seconds = parseTimecode(match);
       const timeStr = formatTimeForUrl(seconds);
-      return `<a href="/vods/video/${id}?time=${timeStr}" class="description-link timecode" data-seek="${seconds}">${match}</a>`;
+      return `<a href="#/video/${id}?time=${timeStr}" class="description-link timecode" data-seek="${seconds}">${match}</a>`;
     });
 
   return (
