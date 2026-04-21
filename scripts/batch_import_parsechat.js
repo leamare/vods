@@ -28,6 +28,7 @@ require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 const pool = require('../backend/db/connection');
 const { saveChatData } = require('../backend/services/chat_db');
+const { importPlaylist } = require('../backend/services/playlist_import');
 
 const PARSECHAT_TEST_DATA = path.join(__dirname, '../../parseChat/test_data');
 
@@ -64,208 +65,46 @@ function listAvailablePlaylists() {
 }
 
 async function importPlaylistFromParseChat(playlistName, existingStreamId = null) {
-  const client = await pool.connect();
-  
-  try {
-    const playlistPath = path.join(PARSECHAT_TEST_DATA, `${playlistName}.json`);
-    
-    if (!fs.existsSync(playlistPath)) {
-      throw new Error(`Playlist file not found: ${playlistPath}`);
-    }
-    
-    const playlist = JSON.parse(fs.readFileSync(playlistPath, 'utf8'));
-    console.log(`\nImporting: ${playlist.gameName}`);
-    console.log(`  Playlist ID: ${playlist.playlistId}`);
-    console.log(`  Videos: ${playlist.videos.length}`);
-    
-    await client.query('BEGIN');
-    
-    // Create or update playlist
-    const playlistResult = await client.query(
-      `INSERT INTO playlists (youtube_id, name, tags) 
-       VALUES ($1, $2, $3) 
-       ON CONFLICT (youtube_id) DO UPDATE SET 
-         name = EXCLUDED.name, 
-         tags = EXCLUDED.tags
-       RETURNING id`,
-      [playlist.playlistId, playlist.gameName, JSON.stringify(playlist.tags || [])]
-    );
-    const playlistId = playlistResult.rows[0].id;
-    console.log(`  Playlist DB ID: ${playlistId}`);
-    
-    const videoIds = [];
-    
-    // Import videos
-    for (let i = 0; i < playlist.videos.length; i++) {
-      const video = playlist.videos[i];
-      
-      // Extract stream title from description if present
-      let subTitle = null;
-      let description = video.description || null;
-      
-      if (description) {
-        const match = description.match(/Stream Title :: (.*?) ::/s);
-        if (match) {
-          subTitle = match[1].trim();
-          description = description.replace(match[0], '').trim();
-        }
-      }
-      
-      const videoResult = await client.query(
-        `INSERT INTO videos (yt_id, name, sub_title, description, duration, published_at, playlist_id, playlist_order) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
-         ON CONFLICT (yt_id) DO UPDATE SET 
-           name = EXCLUDED.name, 
-           sub_title = EXCLUDED.sub_title,
-           description = EXCLUDED.description,
-           duration = EXCLUDED.duration,
-           published_at = EXCLUDED.published_at,
-           playlist_id = EXCLUDED.playlist_id,
-           playlist_order = EXCLUDED.playlist_order
-         RETURNING id`,
-        [
-          video.videoId,
-          video.title,
-          subTitle,
-          description || null,
-          video.duration || null,
-          video.publishedAt ? new Date(video.publishedAt) : null,
-          playlistId,
-          i
-        ]
-      );
-      
-      videoIds.push(videoResult.rows[0].id);
-      console.log(`  Video ${i}: ${video.title} -> ID ${videoResult.rows[0].id}`);
-    }
-    
-    // Create or update stream entry
-    // countOverride is a negative INT that should be added to videos.length
-    const streamCount = playlist.videos.length + (playlist.countOverride || 0);
-    
-    const gameCoverValue = playlist.gameCover 
-      ? (Array.isArray(playlist.gameCover) ? JSON.stringify(playlist.gameCover) : playlist.gameCover)
-      : null;
-    
-    const dateCompleted = playlist.dateOverride 
-      ? new Date(playlist.dateOverride) 
-      : (playlist.videos.length > 0 && playlist.videos[playlist.videos.length - 1].publishedAt 
-          ? new Date(playlist.videos[playlist.videos.length - 1].publishedAt) 
-          : null);
-    
-    if (existingStreamId) {
-      // Attach to existing stream (game) by updating it with new playlist data
-      await client.query(
-        `UPDATE streams SET 
-           playlist_id = $1, first_video_id = $2, stream_count = $3, 
-           game_cover = COALESCE($4, game_cover), date_completed = COALESCE($5, date_completed),
-           tags = $6
-         WHERE id = $7`,
-        [
-          playlistId,
-          videoIds[0],
-          streamCount,
-          gameCoverValue,
-          dateCompleted,
-          JSON.stringify(playlist.tags || []),
-          existingStreamId
-        ]
-      );
-      console.log(`  Attached to existing stream/game (ID: ${existingStreamId})`);
-    } else {
-      // Check if stream already exists - first by YouTube playlist ID, then by game_name
-      let existingStream = await client.query(
-        `SELECT s.id FROM streams s
-         JOIN playlists p ON s.playlist_id = p.id
-         WHERE p.youtube_id = $1`,
-        [playlist.playlistId]
-      );
-      
-      // If not found by YouTube playlist ID, try by game_name (case-insensitive)
-      if (existingStream.rows.length === 0) {
-        existingStream = await client.query(
-          `SELECT id FROM streams WHERE LOWER(game_name) = LOWER($1)`,
-          [playlist.gameName]
-        );
-      }
-      
-      if (existingStream.rows.length === 0) {
-        // Create new stream
-        const result = await client.query(
-          `INSERT INTO streams (game_name, tags, stream_count, playlist_id, first_video_id, game_cover, date_completed)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
-           RETURNING id`,
-          [
-            playlist.gameName,
-            JSON.stringify(playlist.tags || []),
-            streamCount,
-            playlistId,
-            videoIds[0],
-            gameCoverValue,
-            dateCompleted
-          ]
-        );
-        console.log(`  Created new stream entry (ID: ${result.rows[0].id})`);
-      } else {
-        // Update existing stream
-        const streamId = existingStream.rows[0].id;
-        await client.query(
-          `UPDATE streams SET 
-             game_name = $1, tags = $2, stream_count = $3, playlist_id = $4,
-             first_video_id = $5, game_cover = COALESCE($6, game_cover), 
-             date_completed = COALESCE($7, date_completed)
-           WHERE id = $8`,
-          [
-            playlist.gameName,
-            JSON.stringify(playlist.tags || []),
-            streamCount,
-            playlistId,
-            videoIds[0],
-            gameCoverValue,
-            dateCompleted,
-            streamId
-          ]
-        );
-        console.log(`  Updated existing stream entry (ID: ${streamId})`);
-      }
-    }
-    
-    await client.query('COMMIT');
-    
-    // Import chat logs if they exist
-    const chatDirName = playlistName.replace('_playlist', '_playlist_chat');
-    const chatDirPath = path.join(PARSECHAT_TEST_DATA, chatDirName);
-    
-    if (fs.existsSync(chatDirPath)) {
-      console.log(`  Importing chat logs from: ${chatDirName}/`);
-      
-      const chatFiles = fs.readdirSync(chatDirPath)
-        .filter(f => f.endsWith('.json'))
-        .sort((a, b) => parseInt(a) - parseInt(b));
-      
-      for (let i = 0; i < chatFiles.length && i < videoIds.length; i++) {
-        const chatFilePath = path.join(chatDirPath, chatFiles[i]);
-        const chatData = JSON.parse(fs.readFileSync(chatFilePath, 'utf8'));
-        
-        if (chatData.chatList && chatData.chatList.length > 0) {
-          const result = await saveChatData(videoIds[i], chatData);
-          console.log(`    Chat ${i}: ${result.messageCount} messages saved`);
-        } else {
-          console.log(`    Chat ${i}: No messages`);
-        }
-      }
-    } else {
-      console.log(`  No chat directory found`);
-    }
-    
-    return { playlistId, videoIds };
-    
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
+  const playlistPath = path.join(PARSECHAT_TEST_DATA, `${playlistName}.json`);
+
+  if (!fs.existsSync(playlistPath)) {
+    throw new Error(`Playlist file not found: ${playlistPath}`);
   }
+
+  const playlist = JSON.parse(fs.readFileSync(playlistPath, 'utf8'));
+
+  const { playlistId, videoIds } = await importPlaylist(playlist, {
+    existingStreamId,
+    log: (msg) => console.log(msg)
+  });
+
+  // Import chat logs if they exist alongside the playlist json
+  const chatDirName = playlistName.replace('_playlist', '_playlist_chat');
+  const chatDirPath = path.join(PARSECHAT_TEST_DATA, chatDirName);
+
+  if (fs.existsSync(chatDirPath)) {
+    console.log(`  Importing chat logs from: ${chatDirName}/`);
+
+    const chatFiles = fs.readdirSync(chatDirPath)
+      .filter(f => f.endsWith('.json'))
+      .sort((a, b) => parseInt(a) - parseInt(b));
+
+    for (let i = 0; i < chatFiles.length && i < videoIds.length; i++) {
+      const chatFilePath = path.join(chatDirPath, chatFiles[i]);
+      const chatData = JSON.parse(fs.readFileSync(chatFilePath, 'utf8'));
+
+      if (chatData.chatList && chatData.chatList.length > 0) {
+        const result = await saveChatData(videoIds[i], chatData);
+        console.log(`    Chat ${i}: ${result.messageCount} messages saved`);
+      } else {
+        console.log(`    Chat ${i}: No messages`);
+      }
+    }
+  } else {
+    console.log(`  No chat directory found`);
+  }
+
+  return { playlistId, videoIds };
 }
 
 async function importAllPlaylists() {

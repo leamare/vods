@@ -75,16 +75,21 @@ The API automatically loads all endpoints from the `backend/endpoints/` director
 *Game Management:*
 - **GET /admin/game/get** - Get all games with enhanced information (playlist details, videos, etc.)
 - **GET /admin/game/get/{id}** - Get a specific game with enhanced information
-- **POST /admin/game/create** - Create a new game record
+- **POST /admin/game/create** - Create/upsert a game (new schema; alias of `/admin/playlist/import`)
 - **PUT /admin/game/update/{id}** - Update an existing game record
 - **DELETE /admin/game/delete/{id}** - Delete a game record
 
 *Playlist Management:*
 - **GET /admin/playlist/get** - Get all playlists
 - **GET /admin/playlist/get/{id}** - Get a specific playlist
-- **POST /admin/playlist/create** - Create a new playlist
+- **POST /admin/playlist/import** - Upsert playlist + videos + stream entry in one call (new schema)
+- **POST /admin/playlist/create** - Alias of `/admin/playlist/import`
 - **PUT /admin/playlist/update/{id}** - Update an existing playlist
 - **DELETE /admin/playlist/delete/{id}** - Delete a playlist
+
+*Chat Management:*
+- **POST /admin/chat/upload/{videoId}** - Upload parseChat JSON for a video (body IS the parseChat document)
+- **POST /admin/chat/upload-raw** - Upload raw twitch-chat-downloader array (wraps parsing)
 
 *Video Management:*
 - **GET /admin/video/get** - Get all videos
@@ -100,26 +105,49 @@ The API automatically loads all endpoints from the `backend/endpoints/` director
 
 ### Admin API Usage
 
-The admin endpoints allow you to manage game records by providing YouTube playlist and video IDs. The system automatically generates proper names and tags for playlists and videos.
+Admin endpoints require an API key in the `x-access-key` header. The same endpoint is exposed under three URLs for discoverability — `/admin/playlist/import`, `/admin/playlist/create`, `/admin/game/create` — all accept the same new-schema payload and delegate to the shared `importPlaylist` service.
 
-**Create a new game:**
+**Create or update a game (new schema):**
 ```bash
-curl -X POST http://localhost:3001/admin/game/create \
+curl -X POST http://localhost:3001/admin/playlist/import \
+  -H "x-access-key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "gameName": "Super Mario Bros",
-    "playlistId": "PL123456789",
-    "firstVideo": "abc123defgh",
-    "tags": ["Platformer", "Nintendo"],
-    "streams": 1,
-    "dateCompleted": "2024-01-15T20:30:00Z",
-    "gameCover": "https://example.com/cover.jpg"
+    "gameName": "Leap Year",
+    "gameCover": ["igdb", "co8fkf"],
+    "tags": ["Puzzle", "Platformer"],
+    "countOverride": 0,
+    "dateOverride": "",
+    "playlistId": "PL49SnO6hlYwcTVF4aXhLdfFE5PcO4Qeb0",
+    "videos": [
+      {
+        "videoId": "ApIVrGS0OxY",
+        "title": "Leap Year",
+        "publishedAt": "2026-02-11T01:16:05Z",
+        "duration": 24062,
+        "description": "Stream Title :: jonesing for a hit of platforming ::"
+      }
+    ]
   }'
 ```
 
-**Update a game:**
+Matches an existing game first by YouTube playlist id, then by case-insensitive `gameName`. Returns `201` if a new stream row is created, `200` if an existing one is updated. Pass `"existingStreamId": <id>` to attach to a specific stream row regardless of matching.
+
+The response includes the internal video DB ids needed for chat upload:
+
+```json
+{
+  "streamId": 667,
+  "playlistId": 123,
+  "videoIds": [1245],
+  "created": false
+}
+```
+
+**Update a game's metadata only:**
 ```bash
 curl -X PUT http://localhost:3001/admin/game/update/1 \
+  -H "x-access-key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "gameName": "Super Mario Bros (Updated)",
@@ -130,17 +158,6 @@ curl -X PUT http://localhost:3001/admin/game/update/1 \
 **Get all playlists:**
 ```bash
 curl http://localhost:3001/admin/playlist/get
-```
-
-**Create a new playlist:**
-```bash
-curl -X POST http://localhost:3001/admin/playlist/create \
-  -H "Content-Type: application/json" \
-  -d '{
-    "youtube_id": "PL123456789abcdef",
-    "name": "My Custom Playlist",
-    "tags": ["Gaming", "Tutorial"]
-  }'
 ```
 
 **Get all videos:**
@@ -167,27 +184,32 @@ curl -X DELETE http://localhost:3001/admin/game/delete/1
 
 ## Chat Management
 
-### Chat API Endpoint
+### Uploading chat for a video
 
-The `/chat` endpoint supports two formats:
+`POST /admin/chat/upload/<videoId>` takes a parseChat JSON document (the same shape as the files in `parseChat/test_data/*_playlist_chat/*.json`) as the entire request body:
 
-**Legacy format:**
 ```json
 {
-  "message": "Simple chat message",
-  "user_data": { "optional": "metadata" },
-  "secret_key": "your_secret_key"
+  "badgeList": [ ... ],
+  "emoteList": [ ... ],
+  "userList": [ ... ],
+  "chatList": [ { "time": 12, "user": 0, "message": "hello" } ]
 }
 ```
 
-**New format for chat logs:**
-```json
-{
-  "chat_id": 123,
-  "chat_log": { "entire": "chat log object" },
-  "secret_key": "your_secret_key"
-}
+**Upload a local file:**
+```bash
+curl -X POST http://localhost:3001/admin/chat/upload/<videoId> \
+  -H "x-access-key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  --data-binary @0.json
 ```
+
+`<videoId>` in the path can be either the internal DB id (digits) or a YouTube video id. Alternatively, pass `?youtube_id=...` or `?twitch_id=...` as query params.
+
+The endpoint also accepts, for backward compatibility:
+- A `{ "chat_data": <parseChat json>, "video_id"?/"youtube_id"?/"twitch_id"?: ... }` wrapper body
+- A raw twitch-chat-downloader array (will be parsed server-side)
 
 ### Chat Scripts
 
