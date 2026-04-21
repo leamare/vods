@@ -89,14 +89,14 @@ module.exports = (app) => {
         if (offset < 0) {
           removed = await client.query(
             `DELETE FROM chat_messages
-             WHERE metadata_id = $1 AND time_seconds + $2 < 0`,
+             WHERE metadata_id = $1 AND time_seconds - $2 < 0`,
             [metadataId, offset]
           );
         }
 
         const updated = await client.query(
           `UPDATE chat_messages
-           SET time_seconds = time_seconds + $2
+           SET time_seconds = time_seconds - $2
            WHERE metadata_id = $1`,
           [metadataId, offset]
         );
