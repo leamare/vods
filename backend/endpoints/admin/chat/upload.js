@@ -38,6 +38,11 @@ const { saveChatData, getVideoIdByYoutubeId, getVideoIdByTwitchId } = require('.
  *       - in: query
  *         name: twitch_id
  *         schema: { type: string }
+ *       - in: query
+ *         name: time_offset
+ *         schema: { type: integer }
+ *         description: |
+ *           Optional. Removed from every message's `time` before storage
  *     requestBody:
  *       required: true
  *       content:
@@ -66,6 +71,12 @@ module.exports = (app) => {
       const urlVideoId = req.params.videoId;
       const qYoutubeId = req.query.youtube_id;
       const qTwitchId = req.query.twitch_id;
+      const qTimeOffset = req.query.time_offset !== undefined
+        ? parseInt(req.query.time_offset, 10)
+        : null;
+      if (qTimeOffset !== null && Number.isNaN(qTimeOffset)) {
+        return res.status(400).json({ error: 'time_offset must be an integer' });
+      }
       const body = req.body;
 
       // Determine chat data: prefer raw parseChat-shaped body, fall back to
@@ -132,6 +143,15 @@ module.exports = (app) => {
 
       if (!parsedData.chatList || parsedData.chatList.length === 0) {
         return res.status(400).json({ error: 'No chat messages found in data' });
+      }
+
+      if (qTimeOffset) {
+        const shifted = [];
+        for (const msg of parsedData.chatList) {
+          const t = msg.time - qTimeOffset;
+          if (t >= 0) shifted.push({ ...msg, time: t });
+        }
+        parsedData.chatList = shifted;
       }
 
       const result = await saveChatData(internalVideoId, parsedData, twitchVideoId);
